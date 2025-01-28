@@ -4,9 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Realtime location tracker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.css" />
+    <title>Realtime Location Tracker with Layers and Destination</title>
 
-    <!-- leaflet css  -->
+    <!-- leaflet css -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
 
     <style>
@@ -17,60 +18,253 @@
 
         #map {
             width: 100%;
-            height: 100vh;
+            height: 90vh;
+        }
+
+        #controls {
+            padding: 10px;
+            background: #fff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        #controls button {
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f4f4f4;
+            transition: background-color 0.3s;
+        }
+
+        #controls button:hover {
+            background-color: #ddd;
         }
     </style>
 </head>
 
 <body>
+    <div id="controls">
+        <button id="markDestination">Tandai Tujuan</button>
+        <button id="resetDestination">Reset Tag</button>
+        <input type="text" id="searchLocation" placeholder="Cari lokasi..." />
+    </div>
     <div id="map"></div>
+
+    <!-- leaflet js -->
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.min.js"></script>
+    <script>
+        // Map initialization
+        var map = L.map('map').setView([-2.548926, 118.0148634], 5);
+
+        // Base layers
+        var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        });
+
+        var satelliteLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        });
+
+        var darkLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.opentopomap.org">OpenTopoMap</a>'
+        });
+
+        // Add OSM layer as default
+        osmLayer.addTo(map);
+
+
+
+// Fungsi pencarian menggunakan Nominatim API
+function searchLocation(query) {
+    fetch(`https://nominatim.openstreetmap.org/search?q=${query}&format=json&addressdetails=1&limit=5`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.length > 0) {
+                var location = data[0];
+                var lat = location.lat;
+                var lon = location.lon;
+                var name = location.display_name;
+
+                // Tambahkan marker untuk lokasi pencarian
+                var searchMarker = L.marker([lat, lon]).addTo(map)
+                    .bindPopup(name)
+                    .openPopup();
+
+                map.setView([lat, lon], 16); // Fokus ke lokasi yang ditemukan
+            } else {
+                alert("Lokasi tidak ditemukan.");
+            }
+        })
+        .catch(error => console.error("Error during search:", error));
+}
+
+// Event listener untuk pencarian
+document.getElementById('searchLocation').addEventListener('input', function () {
+    var query = this.value;
+    if (query.length >= 3) { // Mulai pencarian setelah 3 karakter
+        searchLocation(query);
+    }
+});
+
+
+
+        // Add layer control
+        var baseMaps = {
+            "OpenStreetMap": osmLayer,
+            "Satellite": satelliteLayer,
+            "Dark Mode": darkLayer
+        };
+
+        L.control.layers(baseMaps).addTo(map);
+
+        // Geolocation variables
+        var marker, circle, polyline;
+        var locationHistory = [];
+
+        // Destination variables
+        var destinationMarker, destinationPolyline;
+        var markingActive = false;
+
+        // Geolocation tracking
+        if (!navigator.geolocation) {
+            console.log("Your browser doesn't support geolocation feature!");
+        } else {
+            setInterval(() => {
+                navigator.geolocation.getCurrentPosition(getPosition);
+            }, 5000);
+        }
+
+        // Geolocation tracking
+        var isFirstLocationUpdate = true; // Variabel untuk mengecek lokasi pertama
+
+        function getPosition(position) {
+            var lat = position.coords.latitude;
+            var long = position.coords.longitude;
+            var accuracy = position.coords.accuracy;
+
+            // Save location to history
+            locationHistory.push([lat, long]);
+
+            // Remove existing markers and circles
+            if (marker) {
+                map.removeLayer(marker);
+            }
+
+            if (circle) {
+                map.removeLayer(circle);
+            }
+
+            if (polyline) {
+                map.removeLayer(polyline);
+            }
+
+            // Add current location marker and accuracy circle
+            marker = L.marker([lat, long]);
+            circle = L.circle([lat, long], { radius: accuracy });
+            polyline = L.polyline(locationHistory, { color: 'blue' });
+
+            var featureGroup = L.featureGroup([marker, circle, polyline]).addTo(map);
+
+            // Jika ini adalah lokasi pertama, langsung gunakan setView
+            if (isFirstLocationUpdate) {
+                map.setView([lat, long], 16); // Fokus ke lokasi pengguna dengan zoom level 16
+                isFirstLocationUpdate = false; // Setelah lokasi pertama, ubah ke false
+            } else {
+                // Untuk pembaruan lokasi berikutnya, gunakan fitBounds
+                map.fitBounds(featureGroup.getBounds());
+            }
+
+            // Update route to destination if it exists
+            if (destinationMarker && destinationPolyline) {
+                map.removeLayer(destinationPolyline);
+                destinationPolyline = L.polyline([[lat, long], destinationMarker.getLatLng()], { color: 'green' }).addTo(map);
+            }
+
+            console.log("Your coordinate is: Lat: " + lat + " Long: " + long + " Accuracy: " + accuracy);
+        }
+
+        // Notifikasi suara
+        var alertSound = new Audio('./public/tung.mp3');  // Ganti dengan path file suara yang diinginkan
+
+        // Mark destination button
+        document.getElementById('markDestination').addEventListener('click', function () {
+            markingActive = true;
+            alert("Click on the map to mark your destination.");
+        });
+
+        // Reset destination button
+        document.getElementById('resetDestination').addEventListener('click', function () {
+            if (destinationMarker) {
+                map.removeLayer(destinationMarker);
+            }
+
+            if (routingControl) {
+                map.removeControl(routingControl);
+            }
+
+            destinationMarker = null;
+            routingControl = null;
+            markingActive = false;
+
+            alert("Destination has been reset.");
+        });
+
+        // Add destination marker on map click when marking is active
+        var routingControl;
+
+        // Add destination marker on map click when marking is active
+        map.on('click', function (e) {
+            if (markingActive) {
+                var destinationLatLng = e.latlng;
+
+                // Remove previous destination marker and route
+                if (destinationMarker) {
+                    map.removeLayer(destinationMarker);
+                }
+                if (routingControl) {
+                    map.removeControl(routingControl);
+                }
+
+                // Add destination marker
+                destinationMarker = L.marker(destinationLatLng, { title: "Destination" }).addTo(map);
+
+                // Add routing from current location to destination
+                if (locationHistory.length > 0) {
+                    var currentLocation = locationHistory[locationHistory.length - 1];
+                    routingControl = L.Routing.control({
+                        waypoints: [
+                            L.latLng(currentLocation[0], currentLocation[1]),
+                            L.latLng(destinationLatLng.lat, destinationLatLng.lng)
+                        ],
+                        routeWhileDragging: true
+                    }).addTo(map);
+                }
+
+                markingActive = false;
+                console.log("Destination set at: Lat: " + destinationLatLng.lat + " Long: " + destinationLatLng.lng);
+            }
+        });
+
+        // Monitor if user goes off route (simple version)
+        map.on('move', function () {
+            if (destinationMarker) {
+                var currentLatLng = marker.getLatLng();
+                var destinationLatLng = destinationMarker.getLatLng();
+                var distance = currentLatLng.distanceTo(destinationLatLng);
+
+                if (distance > 100) {  // Assuming 100 meters as a threshold
+                    alertSound.play();  // Play alert sound
+                    alert("You have gone off the route!");
+                }
+            }
+        });
+
+    </script>
 </body>
+
 </html>
-
-<!-- leaflet js  -->
-<script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
-<script>
-    // Map initialization 
-    var map = L.map('map').setView([14.0860746, 100.608406], 6);
-
-    //osm layer
-    var osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    });
-    osm.addTo(map);
-
-    if(!navigator.geolocation) {
-        console.log("Your browser doesn't support geolocation feature!")
-    } else {
-        setInterval(() => {
-            navigator.geolocation.getCurrentPosition(getPosition)
-        }, 5000);
-    }
-
-    var marker, circle;
-
-    function getPosition(position){
-        // console.log(position)
-        var lat = position.coords.latitude
-        var long = position.coords.longitude
-        var accuracy = position.coords.accuracy
-
-        if(marker) {
-            map.removeLayer(marker)
-        }
-
-        if(circle) {
-            map.removeLayer(circle)
-        }
-
-        marker = L.marker([lat, long])
-        circle = L.circle([lat, long], {radius: accuracy})
-
-        var featureGroup = L.featureGroup([marker, circle]).addTo(map)
-
-        map.fitBounds(featureGroup.getBounds())
-
-        console.log("Your coordinate is: Lat: "+ lat +" Long: "+ long+ " Accuracy: "+ accuracy)
-    }
-
-</script>
